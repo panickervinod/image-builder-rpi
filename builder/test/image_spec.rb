@@ -42,32 +42,4 @@ describe "SD card image" do
       expect(stdout).to contain('/dev/mmcblk0p2 / ext4')
     end
   end
-
-  context "Docker Images" do
-    let(:stdout) { run_mounted("ls /var/local").stdout }
-
-    it "Consul export file exists" do
-      expect(stdout).to contain('rpi-consul_0.6.4.tar.gz')
-    end
-
-    it "Docker Swarm export file exists" do
-      expect(stdout).to contain('rpi-swarm_1.2.2.tar.gz')
-    end
-  end
-
-  context "Docker daemon config" do
-    let(:stdout) { run_mounted("cat /etc/docker/daemon.json").stdout }
-
-    it "Daemon config is empty" do
-      expect(stdout).to contain("{\n}\n\n")
-    end
-  end
-
-  context "Docker service file" do
-    let(:stdout) { run_mounted("cat /etc/systemd/system/docker.service").stdout }
-
-    it "Daemon uses overlay storage driver" do
-      expect(stdout).to contain("--storage-driver overlay")
-    end
-  end
 end

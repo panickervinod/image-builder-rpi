@@ -34,11 +34,11 @@ describe package('firmware-libertas') do
   it { should be_installed }
 end
 
-describe package('firmware-ralink') do
+describe package('firmware-realtek') do
   it { should be_installed }
 end
 
-describe package('firmware-realtek') do
+describe package('lsb-release') do
   it { should be_installed }
 end
 
@@ -54,9 +54,8 @@ describe 'for bluetooth-support' do
   describe package('pi-bluetooth') do
     it { should be_installed }
   end
-
-  describe package('bluetooth') do
-    it { should be_installed }
-  end
 end
 
+describe package('raspi-config') do
+  it { should be_installed }
+end

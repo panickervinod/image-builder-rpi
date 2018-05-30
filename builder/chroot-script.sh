@@ -99,50 +99,71 @@ PACKAGECLOUD_FPR=418A7F2FB0E1E6E7EABF6FE8C2E73424D59097AB
 PACKAGECLOUD_KEY_URL=https://packagecloud.io/gpg.key
 get_gpg "${PACKAGECLOUD_FPR}" "${PACKAGECLOUD_KEY_URL}"
 
-echo 'deb https://packagecloud.io/Hypriot/rpi/debian/ jessie main' > /etc/apt/sources.list.d/hypriot.list
+echo 'deb https://packagecloud.io/Hypriot/rpi/debian/ stretch main' > /etc/apt/sources.list.d/hypriot.list
 
-# set up hypriot schatzkiste repository for generic packages
-echo 'deb https://packagecloud.io/Hypriot/Schatzkiste/debian/ jessie main' >> /etc/apt/sources.list.d/hypriot.list
+# set up Docker CE repository
+DOCKERREPO_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+DOCKERREPO_KEY_URL=https://download.docker.com/linux/raspbian/gpg
+get_gpg "${DOCKERREPO_FPR}" "${DOCKERREPO_KEY_URL}"
+
+CHANNEL=edge # stable, test or edge
+echo "deb [arch=armhf] https://download.docker.com/linux/raspbian stretch $CHANNEL" > /etc/apt/sources.list.d/docker.list
 
 
 RPI_ORG_FPR=CF8A1AF502A2AA2D763BAE7E82B129927FA3303E RPI_ORG_KEY_URL=http://archive.raspberrypi.org/debian/raspberrypi.gpg.key
 get_gpg "${RPI_ORG_FPR}" "${RPI_ORG_KEY_URL}"
 
-echo 'deb http://archive.raspberrypi.org/debian/ jessie main' | tee /etc/apt/sources.list.d/raspberrypi.list
+echo 'deb http://archive.raspberrypi.org/debian/ stretch main' | tee /etc/apt/sources.list.d/raspberrypi.list
 
 # reload package sources
 apt-get update
+apt-get upgrade -y
 
 # install WiFi firmware packages (same as in Raspbian)
 apt-get install -y \
+  --no-install-recommends \
   firmware-atheros \
   firmware-brcm80211 \
   firmware-libertas \
-  firmware-ralink \
+  firmware-misc-nonfree \
   firmware-realtek
 
 # install kernel- and firmware-packages
 apt-get install -y \
-  "raspberrypi-kernel=${KERNEL_BUILD}" \
-  "raspberrypi-bootloader=${KERNEL_BUILD}" \
-  "libraspberrypi0=${KERNEL_BUILD}" \
-  "libraspberrypi-dev=${KERNEL_BUILD}" \
-  "libraspberrypi-bin=${KERNEL_BUILD}" \
-  "libraspberrypi-doc=${KERNEL_BUILD}" \
-  "linux-headers-${KERNEL_VERSION}-hypriotos-v7+" \
-  "linux-headers-${KERNEL_VERSION}-hypriotos+"
+  --no-install-recommends \
+  raspberrypi-bootloader \
+  libraspberrypi0 \
+  libraspberrypi-bin \
+  raspi-config
+
+# install special Docker enabled kernel
+if [ -z "${KERNEL_URL}" ]; then
+  apt-get install -y \
+    --no-install-recommends \
+    "raspberrypi-kernel=${KERNEL_BUILD}"
+else
+  curl -L -o /tmp/kernel.deb "${KERNEL_URL}"
+  dpkg -i /tmp/kernel.deb
+  rm /tmp/kernel.deb
+fi
 
 # enable serial console
 printf "# Spawn a getty on Raspberry Pi serial line\nT0:23:respawn:/sbin/getty -L ttyAMA0 115200 vt100\n" >> /etc/inittab
 
 # boot/cmdline.txt
-echo "+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 cgroup_enable=memory swapaccount=1 elevator=deadline fsck.repair=yes rootwait console=ttyAMA0,115200 kgdboc=ttyAMA0,115200" > /boot/cmdline.txt
+echo "dwc_otg.lpm_enable=0 console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 cgroup_enable=cpuset cgroup_enable=memory swapaccount=1 elevator=deadline fsck.repair=yes rootwait quiet init=/usr/lib/raspi-config/init_resize.sh" > /boot/cmdline.txt
 
 # create a default boot/config.txt file (details see http://elinux.org/RPiconfig)
 echo "
 hdmi_force_hotplug=1
-enable_uart=1
+enable_uart=0
 " > boot/config.txt
+
+echo "# camera settings, see http://elinux.org/RPiconfig#Camera
+start_x=0
+disable_camera_led=1
+gpu_mem=16
+" >> boot/config.txt
 
 # /etc/modules
 echo "snd_bcm2835
@@ -157,42 +178,78 @@ proc /proc proc defaults 0 0
 
 # as the Pi does not have a hardware clock we need a fake one
 apt-get install -y \
+  --no-install-recommends \
   fake-hwclock
 
 # install packages for managing wireless interfaces
 apt-get install -y \
+  --no-install-recommends \
   wpasupplicant \
   wireless-tools \
-  ethtool \
-  crda
+  crda \
+  raspberrypi-net-mods
 
 # add firmware and packages for managing bluetooth devices
 apt-get install -y \
   --no-install-recommends \
-  bluetooth \
   pi-bluetooth
 
-# install hypriot packages for docker-tools
+# ensure compatibility with Docker install.sh, so `raspbian` will be detected correctly
 apt-get install -y \
-  "docker-hypriot=${DOCKER_ENGINE_VERSION}" \
-  "docker-compose=${DOCKER_COMPOSE_VERSION}" \
-  "docker-machine=${DOCKER_MACHINE_VERSION}" \
-  "device-init=${DEVICE_INIT_VERSION}"
+  --no-install-recommends \
+  lsb-release \
+  gettext
 
-# enable Docker systemd service
-systemctl enable docker
+# install cloud-init
+apt-get install -y \
+  cloud-init
 
+# Fix cloud-init package mirrors
+sed -i '/disable_root: true/a apt_preserve_sources_list: true' /etc/cloud/cloud.cfg
+
+# Link cloud-init config to VFAT /boot partition
+mkdir -p /var/lib/cloud/seed/nocloud-net
+ln -s /boot/user-data /var/lib/cloud/seed/nocloud-net/user-data
+ln -s /boot/meta-data /var/lib/cloud/seed/nocloud-net/meta-data
+
+# Fix duplicate IP address for eth0, remove file from os-rootfs
+rm -f /etc/network/interfaces.d/eth0
+
+# install docker-machine
+curl -sSL -o /usr/local/bin/docker-machine "https://github.com/docker/machine/releases/download/v${DOCKER_MACHINE_VERSION}/docker-machine-Linux-armhf"
+chmod +x /usr/local/bin/docker-machine
+
+# install bash completion for Docker Machine
+curl -sSL "https://raw.githubusercontent.com/docker/machine/v${DOCKER_MACHINE_VERSION}/contrib/completion/bash/docker-machine.bash" -o /etc/bash_completion.d/docker-machine
+
+# install docker-compose
+apt-get install -y \
+  --no-install-recommends \
+  python
+curl -sSL https://bootstrap.pypa.io/get-pip.py | python
+pip install "docker-compose==${DOCKER_COMPOSE_VERSION}"
+
+# install bash completion for Docker Compose
+curl -sSL "https://raw.githubusercontent.com/docker/compose/${DOCKER_COMPOSE_VERSION}/contrib/completion/bash/docker-compose" -o /etc/bash_completion.d/docker-compose
+
+# install docker-ce (w/ install-recommends)
+apt-get install -y --force-yes \
+  --no-install-recommends \
+  "docker-ce=${DOCKER_CE_VERSION}"
+
+# install bash completion for Docker CLI
+curl -sSL https://raw.githubusercontent.com/docker/docker-ce/master/components/cli/contrib/completion/bash/docker -o /etc/bash_completion.d/docker
 
 echo "Installing rpi-serial-console script"
 wget -q https://raw.githubusercontent.com/lurch/rpi-serial-console/master/rpi-serial-console -O usr/local/bin/rpi-serial-console
 chmod +x usr/local/bin/rpi-serial-console
 
+# fix eth0 interface name
+ln -s /dev/null /etc/systemd/network/99-default.link
 
-# install Hypriot Cluster-Lab
-apt-get install -y \
-  "hypriot-cluster-lab=${CLUSTER_LAB_VERSION}"
-# do not run cluster-lab automatically
-systemctl disable cluster-lab.service
+# cleanup APT cache and lists
+apt-get clean
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # set device label and version number
 echo "HYPRIOT_DEVICE=\"$HYPRIOT_DEVICE\"" >> /etc/os-release

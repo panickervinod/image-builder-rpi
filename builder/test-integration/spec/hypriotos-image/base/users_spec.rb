@@ -13,6 +13,7 @@ describe user('pirate') do
   it { should have_home_directory '/home/pirate' }
   it { should have_login_shell '/bin/bash' }
   it { should belong_to_group 'docker' }
+  it { should belong_to_group 'video' }
 end
 
 describe file('/etc/sudoers') do
@@ -23,15 +24,8 @@ end
 
 describe file('/etc/sudoers.d') do
   it { should be_directory }
-  it { should be_mode 755 }
+  it { should be_mode 750 }
   it { should be_owned_by 'root' }
-end
-
-describe file('/etc/sudoers.d/user-pirate') do
-  it { should be_file }
-  it { should be_mode 440 }
-  it { should be_owned_by 'root' }
-  its(:content) { should match /pirate ALL=NOPASSWD: ALL/ }
 end
 
 describe file('/root/.bashrc') do
